@@ -1,8 +1,8 @@
+#'==============================================================================
 #'
-#'
-#' Quantify interactions between CNEs and target/bystander genes within GRBs
+#' Anayse chromatin interactions between CNEs and target/bystander genes within GRBs
 #' 
-#'
+#'==============================================================================
 
 # source("https://bioconductor.org/biocLite.R")
 # biocLite(c("biomaRt", "rtracklayer", "InteractionSet", "TxDb.Hsapiens.UCSC.hg19.knownGene"))
@@ -13,6 +13,7 @@ require(TxDb.Hsapiens.UCSC.hg19.knownGene)
 require(chromloop)      # devtools::install_github("ibn-salem/chromloop")
 require(RColorBrewer)
 require(tidyverse)      # for tidy data
+require(ggsignif)       # get significanc stars on plots
 
 #-------------------------------------------------------------------------------
 # set some parameters:
@@ -21,6 +22,7 @@ require(tidyverse)      # for tidy data
 GENES_FILE <- "data/GRB_Interactions/targets_bystanders_hg38.tsv"
 GRB_FILE <- "data/GRB_Interactions/grbsHg38.bed.hg19.bed"
 CNE_FILE <- "data/GRB_Interactions/human_mouse_cnes_hg38.bed.hg19.bed"
+VISTA_FILE <- "data/VistaEnhancers/vista_formated.header.txt"
 
 CaptureHiC_Files <- c(
   "data/Mifsud2015/TS5_GM12878_promoter-promoter_significant_interactions.txt",
@@ -48,6 +50,29 @@ captureHiC <- do.call("c", chicList)
 #-------------------------------------------------------------------------------
 grbGR <- import.bed(GRB_FILE, seqinfo = seqInfo)
 cneGR <- import.bed(CNE_FILE, seqinfo = seqInfo)
+
+#-------------------------------------------------------------------------------
+# Parse VISTA enhancers
+#-------------------------------------------------------------------------------
+#vista <- read_delim(VISTA_FILE, delim = "|", col_names = FALSE, guess_max = 5000)
+vista_dat <- readLines(VISTA_FILE)
+vista_tab <- stringr::str_split_fixed(vista_dat, "\\|", 5) 
+
+vistaDF <- as_tibble(vista_tab) %>% 
+  magrittr::set_colnames(c("species", "loci", "elem", "pos_neg", "annot")) %>% 
+  tidyr::separate(loci, into = c("chr", "start", "end"), sep = "[\\:-]") %>% 
+  filter(species == ">Human") %>% 
+  mutate(
+    chr = stringr::str_extract(chr, "\\S+"),
+    start = parse_integer(start),
+    end = parse_integer(end)
+    )
+
+vistaGR <- GRanges(
+  vistaDF$chr,
+  IRanges(vistaDF$start, vistaDF$end),
+  name = 1:nrow(vistaDF),
+  seqinfo = seqInfo)
 
 #-------------------------------------------------------------------------------
 # get target and bystander gene in hg19 as GenomicRanges object
@@ -91,7 +116,7 @@ tssGR <- GRanges(paste0("chr", genes$chromosome_name),
         IRanges(tssCoord, tssCoord),
         strand = ifelse(genes$strand == 1, '+', '-'), 
         names = genes$ensembl_gene_id, 
-        select(genes, -strand),
+        dplyr::select(genes, -strand),
         seqinfo = seqInfo
         )
 
@@ -110,14 +135,19 @@ geneToGRB <- as_tibble(as.data.frame(findOverlaps(tssGR, grbGR))) %>%
 GrbToCne <- as_tibble(as.data.frame(findOverlaps(grbGR, cneGR))) %>% 
   rename(grb_ID = queryHits, cne_ID = subjectHits)
 
+CneToVista <- as_tibble(as.data.frame(findOverlaps(cneGR, vistaGR))) %>% 
+  rename(cne_ID = queryHits, vista_ID = subjectHits)
+
+
 gene_cne <- genes %>% 
   dplyr::select(-chromosome_name, -start_position, -end_position, -strand, 
                 -status, -gene_biotype, -ucscCoordinates) %>% 
   mutate(gene_ID = 1:nrow(genes)) %>% 
   left_join(geneToGRB, by = "gene_ID") %>% 
   left_join(GrbToCne, by = "grb_ID") %>% 
-  filter(!is.na(gene_ID) & !is.na(cne_ID)) %>% 
-  mutate(gene_cne_ID = 1:n())
+  filter(!is.na(cne_ID)) %>% 
+  mutate(gene_cne_ID = 1:n()) %>% 
+  mutate(vista = factor(cne_ID %in% CneToVista$cne_ID, c(TRUE, FALSE), c("VISTA", "No VISTA")))
 
 #-------------------------------------------------------------------------------
 # interactions between genes and CNEs
@@ -147,7 +177,8 @@ gene_cne_interactions <- as_tibble(data.frame(
 # annotate gene_cne data.frame with interactions
 #-------------------------------------------------------------------------------
 gene_cne <- gene_cne %>%
-  left_join(gene_cne_interactions, by = "gene_cne_ID")
+  left_join(gene_cne_interactions, by = "gene_cne_ID") %>%
+  mutate(prediction = factor(prediction, c("target", "bystander"), c("target", "bystander")))
 
 # save result table
 write_tsv(gene_cne, paste0(outPrefix, ".gene_cne.tsv"))
@@ -161,16 +192,67 @@ save(gene_cne, file = paste0(outPrefix, ".gene_cne.Rdata"))
 #-------------------------------------------------------------------------------
 # Number of CNEs per gene for target vs. bystander
 #-------------------------------------------------------------------------------
-countDF <- gene_cne %>% 
-  dplyr::group_by(ensembl_gene_id, prediction) %>% 
-  dplyr::summarize(n_cne = n())
 
-p <- ggplot(countDF, aes(x = n_cne, y = ..count.., fill = prediction, color = prediction)) + 
+# countPerGRB <- GrbToCne %>% 
+#   count(grb_ID) %>% 
+#   ggplot(aes(x = n)) + geom_density()
+
+countDF <- gene_cne %>% 
+  dplyr::count(ensembl_gene_id, prediction)
+
+p <- ggplot(countDF, aes(x = n, fill = prediction, color = prediction)) + 
   geom_density(alpha = .2) + 
+  theme_bw() +
   scale_fill_manual(values = COL_GENE_GROUP) +
   scale_color_manual(values = COL_GENE_GROUP) +
   labs(x = "Number of CNEs per gene")
+ggsave(paste0(outPrefix, ".cnes_per_gene_by_prediction.densitx.pdf"), w = 6, h = 3)
 
 #-------------------------------------------------------------------------------
-# Number of CNEs per gene for target vs. bystander
+# Summary table of Capture Hi-C by prediction
 #-------------------------------------------------------------------------------
+summaryDF <- gene_cne %>%
+  group_by(vista, prediction) %>% 
+  summarize(
+    n = n(),
+    mean_log_observed_expected_mean = mean(log_observed_expected_mean, na.rm = TRUE),
+    median_log_observed_expected_mean = median(log_observed_expected_mean, na.rm = TRUE),
+    sd_log_observed_expected_mean = sd(log_observed_expected_mean, na.rm = TRUE),
+    mean_raw_count_mean = mean(raw_count_mean, na.rm = TRUE),
+    median_raw_count_mean = median(raw_count_mean, na.rm = TRUE),
+    sd_raw_count_mean = sd(raw_count_mean, na.rm = TRUE)
+  )
+
+write_tsv(summaryDF, paste0(outPrefix, ".CHi-C_by_prediction.summaryDF.tsv"))
+
+#-------------------------------------------------------------------------------
+# Capture Hi-C raw_count mean by prediction boxplot
+#-------------------------------------------------------------------------------
+p <- ggplot(gene_cne, aes(x = prediction, y = raw_count_mean, color = prediction)) + 
+  geom_boxplot() + 
+  facet_grid(. ~ vista, margins = TRUE) +
+  theme_bw() + 
+  theme(axis.text.x=element_text(angle=45, hjust = 1),
+        legend.position = "none") +
+  scale_color_manual(values = COL_GENE_GROUP) + 
+  scale_y_log10() +
+  labs(x = "") + 
+  geom_signif(color = "black", comparisons = list(c("target", "bystander")), 
+              map_signif_level = FALSE, test = "wilcox.test")
+ggsave(paste0(outPrefix, ".CHi-C_raw_count_mean_by_prediction.boxplot.pdf"), w = 3, h = 6)
+
+#-------------------------------------------------------------------------------
+# Capture Hi-C log_obs/exp mean by prediction boxplot
+#-------------------------------------------------------------------------------
+p <- ggplot(gene_cne, aes(x = prediction, y = log_observed_expected_mean, color = prediction)) + 
+  geom_boxplot() + 
+  facet_grid(. ~ vista, margins = TRUE) +
+  theme_bw() + 
+  theme(axis.text.x=element_text(angle=45, hjust = 1),
+        legend.position = "none") +
+  scale_color_manual(values = COL_GENE_GROUP) + 
+  labs(x = "") + 
+  geom_signif(color = "black", comparisons = list(c("target", "bystander")), 
+              map_signif_level = FALSE, test = "wilcox.test")
+ggsave(paste0(outPrefix, ".CHi-C_logObsExp_mean_by_prediction.boxplot.pdf"), w = 3, h = 6)
+
