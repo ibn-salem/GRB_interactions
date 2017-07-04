@@ -57,3 +57,14 @@ mkdir -p Mifsud2015
 wget -P Mifsud2015 http://www.ebi.ac.uk/arrayexpress/files/E-MTAB-2323/E-MTAB-2323.additional.1.zip
 unzip Mifsud2015/E-MTAB-2323.additional.1.zip -d Mifsud2015
 
+#=======================================================================
+# Vista Enhancers
+#=======================================================================
+mkdir -p VistaEnhancers
+wget -O VistaEnhancers/vista.fasta "https://enhancer.lbl.gov/cgi-bin/imagedb3.pl?page_size=100;show=1;search.result=yes;form=search;search.form=no;action=search;search.sequence=1"
+
+cat VistaEnhancers/vista.fasta \
+  |sed 's/<pre>//g' \
+  |sed 's/<\/pre>//g' \
+  |grep ">" \
+  > VistaEnhancers/vista_formated.header.txt
