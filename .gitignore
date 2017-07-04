@@ -3,3 +3,10 @@
 data/GRB_Interactions
 data/UCSC/*
 data/Mifsud2015/*
+data/VistaEnhancers/*
+bin/*
+results/*
+
+.Rproj.user
+.Rhistory
+*.Rproj
