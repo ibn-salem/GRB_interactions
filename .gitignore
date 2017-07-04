@@ -1,0 +1,5 @@
+
+# ignore data files for git sync
+data/GRB_Interactions
+data/UCSC/*
+data/Mifsud2015/*
