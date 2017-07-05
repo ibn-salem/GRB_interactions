@@ -239,7 +239,7 @@ p <- ggplot(gene_cne, aes(x = prediction, y = raw_count_mean, color = prediction
   labs(x = "") + 
   geom_signif(color = "black", comparisons = list(c("target", "bystander")), 
               map_signif_level = FALSE, test = "wilcox.test")
-ggsave(paste0(outPrefix, ".CHi-C_raw_count_mean_by_prediction.boxplot.pdf"), w = 3, h = 6)
+ggsave(paste0(outPrefix, ".CHi-C_raw_count_mean_by_prediction.boxplot.pdf"), w = 3, h = 5)
 
 #-------------------------------------------------------------------------------
 # Capture Hi-C log_obs/exp mean by prediction boxplot
@@ -254,5 +254,5 @@ p <- ggplot(gene_cne, aes(x = prediction, y = log_observed_expected_mean, color 
   labs(x = "") + 
   geom_signif(color = "black", comparisons = list(c("target", "bystander")), 
               map_signif_level = FALSE, test = "wilcox.test")
-ggsave(paste0(outPrefix, ".CHi-C_logObsExp_mean_by_prediction.boxplot.pdf"), w = 3, h = 6)
+ggsave(paste0(outPrefix, ".CHi-C_logObsExp_mean_by_prediction.boxplot.pdf"), w = 3, h = 5)
 
